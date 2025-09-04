@@ -162,30 +162,17 @@
                         throw new Error("Erro ao analisar o arquivo XML.");
                     }
 
-                    const namespaces = {
-                        nfe: "http://www.portalfiscal.inf.br/nfe",
-                        x: "http://www.w3.org/2000/xmlns/",
-                    };
-
                     const findElement = (node, query) => {
-                        const parts = query.split('/');
-                        let currentNode = node;
-                        for (const part of parts) {
-                            const [nsPrefix, tagName] = part.split(':');
-                            const ns = namespaces[nsPrefix];
-                            if (ns) {
-                                currentNode = currentNode?.getElementsByTagNameNS(ns, tagName)[0];
-                            } else {
-                                currentNode = currentNode?.getElementsByTagName(part)[0];
-                            }
-                            if (!currentNode) break;
-                        }
-                        return currentNode;
+                        return node?.querySelector(query);
                     };
 
-                    const emitente = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:emit/nfe:xNome')?.textContent || 'Não encontrado';
-                    const numero_nf = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:ide/nfe:nNF')?.textContent || 'Não encontrado';
-                    const serie_nf = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:ide/nfe:serie')?.textContent || 'Não encontrado';
+                    const findElements = (node, query) => {
+                        return node?.querySelectorAll(query);
+                    };
+                    
+                    const emitente = findElement(xmlDoc, 'xNome')?.textContent || 'Não encontrado';
+                    const numero_nf = findElement(xmlDoc, 'nNF')?.textContent || 'Não encontrado';
+                    const serie_nf = findElement(xmlDoc, 'serie')?.textContent || 'Não encontrado';
                     
                     const items = [];
                     let totalValorLiquido = 0;
@@ -193,51 +180,44 @@
                     let totalIPI = 0;
                     let totalPIS = 0;
                     let totalCOFINS = 0;
+                    
+                    const detElements = findElements(xmlDoc, 'det');
 
-                    xmlDoc.querySelectorAll('det').forEach(det => {
-                        const prod = det.querySelector('prod');
-                        const imposto = det.querySelector('imposto');
+                    detElements.forEach(det => {
+                        const prod = findElement(det, 'prod');
+                        const imposto = findElement(det, 'imposto');
                         
-                        const valor_total = parseFloat(prod?.querySelector('vProd')?.textContent) || 0.0;
+                        const valor_total = parseFloat(findElement(prod, 'vProd')?.textContent) || 0.0;
                         
                         // New, more robust search for taxes
-                        const getTaxValue = (taxNode) => {
-                            if (!taxNode) return { icms: 0, ipi: 0, pis: 0, cofins: 0 };
-                            // Search for common tax nodes inside the Imposto tag
-                            const icmsNode = taxNode.querySelector('ICMS, ICMSSN102, ICMSSN900, ICMSSN500');
-                            const ipiNode = taxNode.querySelector('IPI, IPITrib');
-                            const pisNode = taxNode.querySelector('PIS, PISOutr');
-                            const cofinsNode = taxNode.querySelector('COFINS, COFINSOutr');
-
-                            // Extract values from various possible sub-tags
-                            const icms = parseFloat(icmsNode?.querySelector('vICMS')?.textContent) || 0.0;
-                            const ipi = parseFloat(ipiNode?.querySelector('vIPI')?.textContent) || 0.0;
-                            const pis = parseFloat(pisNode?.querySelector('vPIS')?.textContent) || 0.0;
-                            const cofins = parseFloat(cofinsNode?.querySelector('vCOFINS')?.textContent) || 0.0;
-
-                            return { icms, ipi, pis, cofins };
+                        const getTaxValue = (taxNode, tag) => {
+                           return parseFloat(findElement(taxNode, tag)?.textContent) || 0.0;
                         };
 
-                        const taxValues = getTaxValue(imposto);
-                        const quantidade = parseFloat(prod?.querySelector('qCom')?.textContent) || 0.0;
-                        const valor_liquido = valor_total - (taxValues.icms + taxValues.ipi + taxValues.pis + taxValues.cofins);
+                        const icms = getTaxValue(imposto, 'vICMS');
+                        const ipi = getTaxValue(imposto, 'vIPI');
+                        const pis = getTaxValue(imposto, 'vPIS');
+                        const cofins = getTaxValue(imposto, 'vCOFINS');
 
-                        totalICMS += taxValues.icms;
-                        totalIPI += taxValues.ipi;
-                        totalPIS += taxValues.pis;
-                        totalCOFINS += taxValues.cofins;
+                        const quantidade = parseFloat(findElement(prod, 'qCom')?.textContent) || 0.0;
+                        const valor_liquido = valor_total - (icms + ipi + pis + cofins);
+
+                        totalICMS += icms;
+                        totalIPI += ipi;
+                        totalPIS += pis;
+                        totalCOFINS += cofins;
                         totalValorLiquido += valor_liquido;
 
                         items.push({
-                            codigo: prod?.querySelector('cProd')?.textContent || 'Não disponível',
-                            descricao: prod?.querySelector('xProd')?.textContent || 'Não disponível',
+                            codigo: findElement(prod, 'cProd')?.textContent || 'Não disponível',
+                            descricao: findElement(prod, 'xProd')?.textContent || 'Não disponível',
                             quantidade: quantidade,
-                            valor_unitario: parseFloat(prod?.querySelector('vUnCom')?.textContent) || 0.0,
+                            valor_unitario: parseFloat(findElement(prod, 'vUnCom')?.textContent) || 0.0,
                             valor_total: valor_total,
-                            icms: taxValues.icms,
-                            ipi: taxValues.ipi,
-                            pis: taxValues.pis,
-                            cofins: taxValues.cofins,
+                            icms: icms,
+                            ipi: ipi,
+                            pis: pis,
+                            cofins: cofins,
                             valor_liquido: valor_liquido,
                             valor_liquido_unitario: quantidade > 0 ? valor_liquido / quantidade : 0.0
                         });
