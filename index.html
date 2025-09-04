@@ -28,7 +28,7 @@
         }
         .loading-spinner {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #00c4cc; /* New color */
+            border-top: 4px solid #00c4cc;
             border-radius: 50%;
             width: 30px;
             height: 30px;
@@ -78,8 +78,8 @@
             <div id="resultsCard" class="card results-section" style="display:none;">
                 <h2 class="text-2xl font-bold text-slate-700 mb-4">Resultados da NF-e</h2>
                 <pre id="resultsText" class="bg-gray-100 p-4 rounded-lg overflow-x-auto text-sm text-gray-800"></pre>
-                <button id="generateReportButton" class="btn hidden mt-6 bg-purple-600 text-white px-6 py-2 hover:bg-purple-700">
-                    Gerar Relatório Excel
+                <button id="downloadReportButton" class="btn hidden mt-6 bg-purple-600 text-white px-6 py-2 hover:bg-purple-700">
+                    Baixar Dados para Relatório
                 </button>
             </div>
         </main>
@@ -97,9 +97,8 @@
         const messageText = document.getElementById('messageText');
         const resultsCard = document.getElementById('resultsCard');
         const resultsText = document.getElementById('resultsText');
-        const generateReportButton = document.getElementById('generateReportButton');
+        const downloadReportButton = document.getElementById('downloadReportButton');
 
-        // Custom function to show messages instead of alert()
         function showMessage(message, type = 'info') {
             messageText.textContent = message;
             messageBox.style.display = 'flex';
@@ -112,13 +111,11 @@
             }
         }
 
-        // Show/hide loading spinner
         function toggleLoading(show) {
             loadingIndicator.style.display = show ? 'block' : 'none';
             processButton.disabled = show;
         }
 
-        // Handle file selection
         fileInput.addEventListener('change', () => {
             const file = fileInput.files[0];
             if (file) {
@@ -131,7 +128,6 @@
             }
         });
 
-        // Handle processing button click
         processButton.addEventListener('click', () => {
             const file = fileInput.files[0];
             if (!file) {
@@ -160,11 +156,9 @@
                         throw new Error("Erro ao analisar o arquivo XML.");
                     }
 
-                    // Define namespaces to correctly find elements
                     const namespaces = {
                         nfe: "http://www.portalfiscal.inf.br/nfe",
                         x: "http://www.w3.org/2000/xmlns/",
-                        // Add other namespaces if needed
                     };
 
                     const findElement = (node, query) => {
@@ -183,7 +177,6 @@
                         return currentNode;
                     };
 
-                    // Extract main data
                     const emitente = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:emit/nfe:xNome')?.textContent || 'Não encontrado';
                     const numero_nf = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:ide/nfe:nNF')?.textContent || 'Não encontrado';
                     const serie_nf = findElement(xmlDoc, 'nfe:NFe/nfe:infNFe/nfe:ide/nfe:serie')?.textContent || 'Não encontrado';
@@ -193,19 +186,29 @@
                         const prod = det.querySelector('prod');
                         const imposto = det.querySelector('imposto');
                         
-                        // Default to 0.0 if not found to avoid null issues
                         const valor_total = parseFloat(prod?.querySelector('vProd')?.textContent) || 0.0;
-                        const icms = parseFloat(imposto?.querySelector('ICMS > vICMS')?.textContent) || 
-                                     parseFloat(imposto?.querySelector('ICMS > ICMSSN102 > vICMS')?.textContent) || 
-                                     parseFloat(imposto?.querySelector('ICMS > ICMSSN900 > vICMS')?.textContent) || 0.0;
-                        const ipi = parseFloat(imposto?.querySelector('IPI > vIPI')?.textContent) || 
-                                    parseFloat(imposto?.querySelector('IPI > IPITrib > vIPI')?.textContent) || 0.0;
-                        const pis = parseFloat(imposto?.querySelector('PIS > vPIS')?.textContent) ||
-                                     parseFloat(imposto?.querySelector('PIS > PISOutr > vPIS')?.textContent) || 0.0;
-                        const cofins = parseFloat(imposto?.querySelector('COFINS > vCOFINS')?.textContent) || 
-                                        parseFloat(imposto?.querySelector('COFINS > COFINSOutr > vCOFINS')?.textContent) || 0.0;
+                        
+                        // New, more robust search for taxes
+                        const getTaxValue = (taxNode) => {
+                            if (!taxNode) return 0.0;
+                            // Search for common tax nodes inside the Imposto tag
+                            const icmsNode = taxNode.querySelector('ICMS, ICMSSN102, ICMSSN900, ICMSSN500');
+                            const ipiNode = taxNode.querySelector('IPI, IPITrib');
+                            const pisNode = taxNode.querySelector('PIS, PISOutr');
+                            const cofinsNode = taxNode.querySelector('COFINS, COFINSOutr');
+
+                            // Extract values from various possible sub-tags
+                            const icms = parseFloat(icmsNode?.querySelector('vICMS')?.textContent) || 0.0;
+                            const ipi = parseFloat(ipiNode?.querySelector('vIPI')?.textContent) || 0.0;
+                            const pis = parseFloat(pisNode?.querySelector('vPIS')?.textContent) || 0.0;
+                            const cofins = parseFloat(cofinsNode?.querySelector('vCOFINS')?.textContent) || 0.0;
+
+                            return { icms, ipi, pis, cofins };
+                        };
+
+                        const taxValues = getTaxValue(imposto);
                         const quantidade = parseFloat(prod?.querySelector('qCom')?.textContent) || 0.0;
-                        const valor_liquido = valor_total - (icms + ipi + pis + cofins);
+                        const valor_liquido = valor_total - (taxValues.icms + taxValues.ipi + taxValues.pis + taxValues.cofins);
                         
                         items.push({
                             codigo: prod?.querySelector('cProd')?.textContent || 'Não disponível',
@@ -213,16 +216,15 @@
                             quantidade: quantidade,
                             valor_unitario: parseFloat(prod?.querySelector('vUnCom')?.textContent) || 0.0,
                             valor_total: valor_total,
-                            icms: icms,
-                            ipi: ipi,
-                            pis: pis,
-                            cofins: cofins,
+                            icms: taxValues.icms,
+                            ipi: taxValues.ipi,
+                            pis: taxValues.pis,
+                            cofins: taxValues.cofins,
                             valor_liquido: valor_liquido,
                             valor_liquido_unitario: quantidade > 0 ? valor_liquido / quantidade : 0.0
                         });
                     });
 
-                    // Prepare and display results
                     let result = `Emitente: ${emitente}\nNúmero da NF: ${numero_nf}\nSérie da NF: ${serie_nf}\n`;
                     result += '----------------------------------------------------------\n';
                     
@@ -242,12 +244,12 @@
                             result += `  Valor Líquido Unitário: R$${item.valor_liquido_unitario.toFixed(2)}\n`;
                             result += `  Valor Líquido Total: R$${item.valor_liquido.toFixed(2)}\n`;
                         });
-                        sessionStorage.setItem('nfe_itens', JSON.stringify(items));
-                        generateReportButton.style.display = 'block';
+                        sessionStorage.setItem('nfe_itens_json', JSON.stringify(items));
+                        downloadReportButton.style.display = 'block';
                     } else {
                         result += '\nNenhuma informação detalhada de itens encontrada.';
-                        sessionStorage.removeItem('nfe_itens');
-                        generateReportButton.style.display = 'none';
+                        sessionStorage.removeItem('nfe_itens_json');
+                        downloadReportButton.style.display = 'none';
                     }
 
                     resultsText.textContent = result;
@@ -265,26 +267,24 @@
             reader.readAsText(file);
         });
 
-        // Handle report generation button click
-        generateReportButton.addEventListener('click', () => {
-            const data = sessionStorage.getItem('nfe_itens');
+        downloadReportButton.addEventListener('click', () => {
+            const data = sessionStorage.getItem('nfe_itens_json');
             if (!data) {
-                showMessage('Nenhum dado de itens para gerar o relatório.', 'error');
+                showMessage('Nenhum dado para baixar.', 'error');
                 return;
             }
 
-            const message = `
-                Para gerar o relatório Excel, copie os dados abaixo para o arquivo 'excel_generator.py' e o execute.
-                
-                1. Copie o JSON abaixo:
-                
-                ${data}
-                
-                2. Cole-o na variável 'itens_data' no arquivo 'excel_generator.py'.
-                3. Salve o arquivo 'excel_generator.py' e execute-o com 'python excel_generator.py' no seu terminal.
-            `;
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'nfe_data.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
             
-            showMessage(message, 'info');
+            showMessage('Arquivo nfe_data.json baixado com sucesso!', 'info');
         });
     </script>
 </body>
